@@ -49,3 +49,6 @@ htmlcov/
 
 # Docker
 .dockerignore
+
+# Launcher local para la VM (no se versiona)
+scripts/

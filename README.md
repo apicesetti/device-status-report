@@ -14,9 +14,6 @@ device-status-report/
 │   ├── requirements_api.txt # Dependencias Python
 │   ├── Dockerfile.api       # Imagen Docker
 │   └── API_README.md        # Documentación detallada de la API
-├── scripts/                 # Utilidades de despliegue
-│   ├── backend_windows.py   # Launcher para VM Windows (clona repo + lanza API)
-│   └── README.md            # Instrucciones de uso del launcher
 └── README.md                # Este archivo
 ```
 
@@ -25,18 +22,13 @@ device-status-report/
 ```bash
 cd API_REST
 pip install -r requirements_api.txt
-cp .env.example
+cp .env.example .env
 cp tokens.example.json tokens.json
 # Editar .env y tokens.json con los valores reales
 python api_main.py
 ```
 
 La API queda disponible en `http://localhost:8000`. Documentación interactiva en `/docs`.
-
-## Despliegue en VM Windows
-
-Para levantar la API en una máquina Windows sin configuración manual del entorno,
-usar el launcher incluido. Ver [scripts/README.md](scripts/README.md).
 
 ## Documentación completa
 
