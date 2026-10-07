@@ -1,0 +1,18 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Instalar dependencias
+COPY requirements_api.txt .
+RUN pip install --no-cache-dir -r requirements_api.txt
+
+# Copiar código
+COPY api_main.py .
+COPY firebase-key.json .
+COPY tokens.json .
+
+# Exponer puerto
+EXPOSE 8000
+
+# Run
+CMD ["python", "api_main.py"]

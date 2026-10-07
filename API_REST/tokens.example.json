@@ -1,0 +1,7 @@
+{
+  "tokens": [
+    "sk-reemplazar-por-token-real",
+    "sk-reemplazar-por-segundo-token"
+  ],
+  "description": "Tokens válidos para la API. Copiar a tokens.json y reemplazar por los tokens reales. NO commitear tokens.json."
+}
