@@ -315,28 +315,6 @@ curl -X POST -H "token: <tu-token>" \
 
 ---
 
-## 🧪 Testing
-
-El script lee el token y la URL desde variables de entorno:
-
-```bash
-export API_TEST_TOKEN=sk-tu-token-real   # token válido en tokens.json
-export API_BASE_URL=http://localhost:8000  # opcional, default: localhost:8000
-python test_api.py
-```
-
-Esto ejecuta 8 tests:
-1. Health check
-2. Validación de token
-3. POST un documento
-4. POST múltiples documentos (incluyendo errores)
-5. GET por licensePlate
-6. GET por comm y rango de fechas
-7. GET por ID
-8. Token inválido (401)
-
----
-
 ## 📝 Logging
 
 Los logs se escriben en stdout:
@@ -385,7 +363,6 @@ RATE_LIMIT_GET=120
 ├── .env                     # Variables de entorno (NO commitear — ignorado en .gitignore)
 ├── .env.example             # Template .env (incluido en repo)
 ├── requirements_api.txt     # Dependencias Python
-├── test_api.py              # Script de tests
 ├── Dockerfile.api           # Para Docker
 └── API_README.md            # Este archivo
 ```

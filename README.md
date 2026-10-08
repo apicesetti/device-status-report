@@ -8,7 +8,6 @@ Sistema para registrar y consultar el estado de dispositivos GPS (comunicación,
 device-status-report/
 ├── API_REST/                # API FastAPI (principal)
 │   ├── api_main.py          # Servidor FastAPI
-│   ├── test_api.py          # Tests de integración
 │   ├── .env.example         # Template de variables de entorno
 │   ├── tokens.example.json  # Plantilla de tokens de acceso
 │   ├── requirements_api.txt # Dependencias Python

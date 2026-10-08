@@ -42,6 +42,9 @@ Thumbs.db
 *.log
 logs/
 
+# Tests locales contra producción (no se versiona)
+API_REST/test_api.py
+
 # Testing
 .pytest_cache/
 .coverage

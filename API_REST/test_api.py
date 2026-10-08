@@ -8,16 +8,131 @@ Respuesta del GET:
 Orden interno (no configurable por el cliente):
   - Sin date params    -> date DESC, __name__ DESC  (newest first)
   - Con date_from/to   -> date ASC,  __name__ ASC   (oldest first)
+
+Uso:
+    python test_api.py [--url URL] [--token TOKEN] [--timeout N] [--max-pages N]
+                       [--tokens-file RUTA]
+
+Config en orden de prioridad:
+    1. Argumentos CLI (--url, --token)
+    2. Variables de entorno API_BASE_URL / API_TEST_TOKEN
+    3. .env en la misma carpeta que este script
+    4. tokens.json en la misma carpeta que este script  (o --tokens-file)
+    5. Default http://20.51.106.234:8000
 """
 
-import os
-import requests
 import json
+import os
+import sys
+import argparse
+import requests
+from pathlib import Path
 from datetime import datetime, timedelta
 
-BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
-TOKEN    = os.getenv("API_TEST_TOKEN", "")
-HEADERS  = {"token": TOKEN}
+# ---- Constantes por defecto (se sobreescriben en __main__) ----
+TIMEOUT   = 15
+MAX_PAGES = 20
+
+BASE_URL = "http://20.51.106.234:8000"
+TOKEN    = ""
+HEADERS  = {}
+
+
+def _load_dotenv(env_path: Path):
+    """Carga un .env manualmente si python-dotenv no esta disponible."""
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(dotenv_path=env_path, override=False)
+    except ImportError:
+        if not env_path.exists():
+            return
+        with open(env_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key = key.strip()
+                val = val.strip().strip('"').strip("'")
+                os.environ.setdefault(key, val)
+
+
+def _load_tokens_json(path: Path) -> tuple[str, str]:
+    """
+    Carga el primer token no vacío de un archivo tokens.json.
+
+    Formato esperado: {"tokens": ["sk-...", ...]}
+    También acepta lista directa: ["sk-...", ...]
+
+    Devuelve (token, fuente_descripcion) o ("", "") si no se obtiene nada.
+    Lanza SystemExit con mensaje claro si el archivo existe pero está mal formado o vacío.
+    """
+    if not path.exists():
+        return "", ""
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            data = json.load(f)
+    except json.JSONDecodeError as exc:
+        print(f"ERROR: {path.name} está mal formado (JSON inválido): {exc}")
+        sys.exit(1)
+
+    if isinstance(data, list):
+        tokens_list = data
+    elif isinstance(data, dict):
+        tokens_list = data.get("tokens", [])
+    else:
+        print(f"ERROR: {path.name} tiene un formato inesperado (se esperaba objeto con 'tokens' o lista).")
+        sys.exit(1)
+
+    if not isinstance(tokens_list, list):
+        print(f"ERROR: El campo 'tokens' en {path.name} debe ser una lista.")
+        sys.exit(1)
+
+    for t in tokens_list:
+        if isinstance(t, str) and t.strip():
+            return t.strip(), str(path)
+
+    print(f"ERROR: {path.name} existe pero no contiene ningún token válido (lista vacía o tokens en blanco).")
+    sys.exit(1)
+
+
+def _resolve_config(args) -> tuple[str, str, str]:
+    """
+    Devuelve (base_url, token, token_source) según el orden de prioridad.
+
+    token_source es una cadena descriptiva de dónde se obtuvo el token.
+    """
+    # 3. .env (solo si no hay env vars ya seteadas)
+    env_file = Path(__file__).resolve().parent / ".env"
+    _load_dotenv(env_file)
+
+    # 2. Variables de entorno
+    base_url     = os.getenv("API_BASE_URL", "http://20.51.106.234:8000")
+    token        = os.getenv("API_TEST_TOKEN", "")
+    token_source = "API_TEST_TOKEN (env)" if token else ""
+
+    # 4. tokens.json (ruta configurable con --tokens-file)
+    if not token:
+        tokens_path = (
+            Path(args.tokens_file).resolve()
+            if getattr(args, "tokens_file", None)
+            else Path(__file__).resolve().parent / "tokens.json"
+        )
+        token, token_source = _load_tokens_json(tokens_path)
+        if token:
+            token_source = f"tokens.json ({tokens_path})"
+
+    # 1. Argumentos CLI (mayor prioridad)
+    if args.url:
+        base_url = args.url
+    if args.token:
+        token        = args.token
+        token_source = "--token (CLI)"
+
+    # Quitar barra final
+    base_url = base_url.rstrip("/")
+
+    return base_url, token, token_source
 
 
 def safe_json(response):
@@ -34,7 +149,16 @@ def test_health():
     print("=" * 60)
     print("1. TEST: Health Check")
     print("=" * 60)
-    r = requests.get(f"{BASE_URL}/health")
+    try:
+        r = requests.get(f"{BASE_URL}/health", timeout=TIMEOUT)
+    except (requests.ConnectionError, requests.Timeout) as exc:
+        print(f"  ERROR DE CONEXION: {exc}")
+        print()
+        print("  Verificar:")
+        print(f"    - IP/host correcta: {BASE_URL}")
+        print("    - Puerto 8000 abierto en el firewall de la VM / NSG de Azure")
+        print("    - La API esta corriendo en la VM")
+        sys.exit(2)
     body = safe_json(r)
     print(f"Status: {r.status_code}")
     print(f"firestore: {body.get('firestore')}")
@@ -48,7 +172,11 @@ def test_validate_token():
     print("=" * 60)
     print("2. TEST: Validate Token")
     print("=" * 60)
-    r = requests.post(f"{BASE_URL}/api/v1/auth/validate-token", headers=HEADERS)
+    r = requests.post(
+        f"{BASE_URL}/api/v1/auth/validate-token",
+        headers=HEADERS,
+        timeout=TIMEOUT,
+    )
     body = safe_json(r)
     print(f"Status: {r.status_code}")
     assert r.status_code == 200, f"Esperaba 200, got {r.status_code}: {body}"
@@ -69,7 +197,12 @@ def test_post_single():
         "comm": True,
         "date": datetime.now().isoformat()
     }]}
-    r = requests.post(f"{BASE_URL}/api/v1/deviceStatus", json=data, headers=HEADERS)
+    r = requests.post(
+        f"{BASE_URL}/api/v1/deviceStatus",
+        json=data,
+        headers=HEADERS,
+        timeout=TIMEOUT,
+    )
     body = safe_json(r)
     print(f"Status: {r.status_code}")
     assert r.status_code == 200, f"Esperaba 200: {body}"
@@ -110,7 +243,12 @@ def test_post_multiple():
             "comm": True
         }
     ]}
-    r = requests.post(f"{BASE_URL}/api/v1/deviceStatus", json=data, headers=HEADERS)
+    r = requests.post(
+        f"{BASE_URL}/api/v1/deviceStatus",
+        json=data,
+        headers=HEADERS,
+        timeout=TIMEOUT,
+    )
     body = safe_json(r)
     print(f"Status: {r.status_code}")
     assert r.status_code == 200, f"Esperaba 200: {body}"
@@ -129,7 +267,8 @@ def test_get_by_license_plate():
     r = requests.get(
         f"{BASE_URL}/api/v1/deviceStatus",
         params={"licensePlate": "ABC123"},
-        headers=HEADERS
+        headers=HEADERS,
+        timeout=TIMEOUT,
     )
     body = safe_json(r)
     print(f"Status: {r.status_code}")
@@ -165,7 +304,8 @@ def test_get_by_comm_and_date():
     r = requests.get(
         f"{BASE_URL}/api/v1/deviceStatus",
         params={"comm": "true", "date_from": date_from},
-        headers=HEADERS
+        headers=HEADERS,
+        timeout=TIMEOUT,
     )
     body = safe_json(r)
     print(f"Status: {r.status_code}")
@@ -199,7 +339,8 @@ def test_get_by_id(doc_id=None):
         r = requests.get(
             f"{BASE_URL}/api/v1/deviceStatus",
             params={"licensePlate": "ABC123"},
-            headers=HEADERS
+            headers=HEADERS,
+            timeout=TIMEOUT,
         )
         list_body = safe_json(r)
         items = list_body.get("items", [])
@@ -210,7 +351,11 @@ def test_get_by_id(doc_id=None):
         doc_id = items[0]["id"]
 
     print(f"Usando ID: {doc_id}")
-    r = requests.get(f"{BASE_URL}/api/v1/deviceStatus/{doc_id}", headers=HEADERS)
+    r = requests.get(
+        f"{BASE_URL}/api/v1/deviceStatus/{doc_id}",
+        headers=HEADERS,
+        timeout=TIMEOUT,
+    )
     body = safe_json(r)
     print(f"Status: {r.status_code}")
     assert r.status_code == 200, f"Esperaba 200: {body}"
@@ -226,7 +371,8 @@ def test_invalid_token():
     r = requests.get(
         f"{BASE_URL}/api/v1/deviceStatus",
         params={"licensePlate": "ABC123"},
-        headers={"token": "invalid-token"}
+        headers={"token": "invalid-token"},
+        timeout=TIMEOUT,
     )
     body = safe_json(r)
     print(f"Status: {r.status_code}")
@@ -238,7 +384,7 @@ def test_invalid_token():
 def test_pagination():
     """
     Test 9: paginacion con limit=1.
-    Itera por todas las paginas y verifica que no haya IDs duplicados.
+    Itera hasta MAX_PAGES paginas y verifica que no haya IDs duplicados.
     Verifica el orden segun el modo (con/sin date params).
     """
     print("=" * 60)
@@ -252,6 +398,10 @@ def test_pagination():
     page = 0
 
     while True:
+        if page >= MAX_PAGES:
+            print(f"  [TOPE] Se alcanzo el limite de {MAX_PAGES} paginas (DESC); deteniendo.")
+            break
+
         params = {"licensePlate": "ABC123", "limit": 1}
         if cursor:
             params["cursor"] = cursor
@@ -259,7 +409,8 @@ def test_pagination():
         r = requests.get(
             f"{BASE_URL}/api/v1/deviceStatus",
             params=params,
-            headers=HEADERS
+            headers=HEADERS,
+            timeout=TIMEOUT,
         )
         body = safe_json(r)
         assert r.status_code == 200, f"Paginacion DESC page {page}: status={r.status_code}: {body}"
@@ -303,6 +454,10 @@ def test_pagination():
     page = 0
 
     while True:
+        if page >= MAX_PAGES:
+            print(f"  [TOPE] Se alcanzo el limite de {MAX_PAGES} paginas (ASC); deteniendo.")
+            break
+
         params = {"comm": "true", "date_from": date_from, "limit": 1}
         if cursor:
             params["cursor"] = cursor
@@ -310,7 +465,8 @@ def test_pagination():
         r = requests.get(
             f"{BASE_URL}/api/v1/deviceStatus",
             params=params,
-            headers=HEADERS
+            headers=HEADERS,
+            timeout=TIMEOUT,
         )
         body = safe_json(r)
         assert r.status_code == 200, f"Paginacion ASC page {page}: {r.status_code}: {body}"
@@ -347,9 +503,45 @@ def test_pagination():
 # ==================== MAIN ====================
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Tests para la API deviceStatus v2")
+    parser.add_argument("--url",         default=None, help="URL base de la API (ej. http://1.2.3.4:8000)")
+    parser.add_argument("--token",       default=None, help="Token de autenticacion")
+    parser.add_argument("--timeout",     type=int, default=15, help="Timeout en segundos para cada request (default: 15)")
+    parser.add_argument("--max-pages",   type=int, default=20, help="Maximo de paginas en test_pagination (default: 20)")
+    parser.add_argument("--tokens-file", default=None, metavar="RUTA",
+                        help="Ruta alternativa a tokens.json (default: tokens.json junto al script)")
+    args = parser.parse_args()
+
+    # Resolver configuracion
+    base_url, token, token_source = _resolve_config(args)
+
+    # Aplicar a globales usados por los tests
+    TIMEOUT   = args.timeout
+    MAX_PAGES = args.max_pages
+    BASE_URL  = base_url
+    TOKEN     = token
+    HEADERS   = {"token": TOKEN}
+
+    # Validar que haya token antes de correr
+    if not TOKEN:
+        print("ERROR: No se encontro token de autenticacion.")
+        print("  Opciones (en orden de prioridad):")
+        print("    --token <tu-token>")
+        print("    Variable de entorno: API_TEST_TOKEN=<tu-token>")
+        print("    Archivo .env en la carpeta del script: API_TEST_TOKEN=<tu-token>")
+        print("    tokens.json en la carpeta del script: {\"tokens\": [\"sk-...\"]}")
+        print("    --tokens-file <ruta> para indicar otro tokens.json")
+        sys.exit(1)
+
+    # Encabezado
+    token_masked = TOKEN[:6] + "..." if len(TOKEN) > 6 else "***"
     print("\n")
     print("=" * 60)
     print("  TESTS API v2 - deviceStatus (cursor pagination)")
+    print("=" * 60)
+    print(f"  URL:     {BASE_URL}")
+    print(f"  Token:   {token_masked}  ({token_source})")
+    print(f"  Timeout: {TIMEOUT}s  |  Max pages: {MAX_PAGES}")
     print("=" * 60)
     print()
 
@@ -365,13 +557,13 @@ if __name__ == "__main__":
             print(f"  ERROR: {e}")
             failures.append(fn.__name__)
 
-    inserted_id = run(test_health)
+    run(test_health)
     run(test_validate_token)
     inserted_id = run(test_post_single)
     run(test_post_multiple)
     items = run(test_get_by_license_plate)
     run(test_get_by_comm_and_date)
-    doc_id = (items[0]["id"] if items else None) if items else None
+    doc_id = items[0]["id"] if items else None
     run(test_get_by_id, doc_id)
     run(test_invalid_token)
     run(test_pagination)
@@ -379,6 +571,8 @@ if __name__ == "__main__":
     print("=" * 60)
     if failures:
         print(f"FALLARON: {failures}")
+        print("=" * 60)
+        sys.exit(1)
     else:
         print("TODOS LOS TESTS PASARON")
-    print("=" * 60)
+        print("=" * 60)
