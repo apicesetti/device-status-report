@@ -440,4 +440,22 @@ tail -f api.log
 ---
 
 **Versión:** 1.0.0  
-**Última actualización:** 2026-10-07
+**Última actualización:** 2026-10-08
+
+---
+
+## 🐍 Compatibilidad Python
+
+- **Python 3.11** (Docker, desarrollo local)
+- **Python 3.14** (VM de producción, cp314-win_amd64) — todas las dependencias tienen wheels binarios precompilados; no se requieren compiladores C/Rust.
+
+Versiones de dependencias directas:
+
+| Paquete | Versión |
+|---|---|
+| fastapi | 0.115.12 |
+| uvicorn | 0.34.3 |
+| pydantic | 2.14.0 |
+| google-cloud-firestore | 2.20.2 |
+| google-auth | 2.40.1 |
+| python-dotenv | 1.1.0 |

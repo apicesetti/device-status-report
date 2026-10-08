@@ -15,7 +15,7 @@ import time
 
 from fastapi import FastAPI, HTTPException, Header, Query, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, validator, ValidationError
+from pydantic import BaseModel, Field, field_validator, ValidationError
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from google.oauth2 import service_account
@@ -215,13 +215,15 @@ class DeviceStatusCreate(BaseModel):
     comm:         bool
     date:         Optional[datetime] = None
 
-    @validator("licensePlate")
+    @field_validator("licensePlate")
+    @classmethod
     def validate_license_plate(cls, v):
         if len(v) < 2:
             raise ValueError("licensePlate debe tener al menos 2 caracteres")
         return v.upper()
 
-    @validator("deviceId")
+    @field_validator("deviceId")
+    @classmethod
     def validate_device_id(cls, v):
         if not v.isalnum():
             raise ValueError("deviceId solo puede contener letras y números")
